@@ -16,28 +16,41 @@ variable "resource_group_name" {
   description = "Name of the resource group to contain all FinOps resources."
 }
 
-# Email recipients for Advisor reports (supports multiple recipients)
+# Multi-profile configuration per team/customer/department
+variable "report_profiles" {
+  type = map(object({
+    email_recipients       = list(string)
+    advisor_categories     = list(string)
+    advisor_threshold_cost = number
+    filter_tags            = map(string)
+    allowed_resource_types = list(string)
+  }))
+  default = {}
+  description = <<EOD
+Map of reporting profiles, each representing a department or customer.
+Each profile controls which recipients receive which filtered Advisor alerts.
+EOD
+}
+
+# (Optional fallback if only using one profile)
 variable "email_recipients" {
   type        = list(string)
   default     = ["finops@example.com"]
-  description = "List of email addresses to receive filtered Advisor alerts."
+  description = "List of email addresses to receive filtered Advisor alerts. (used only if report_profiles is empty)"
 }
 
-# Minimum potential savings (USD) for an Advisor recommendation to be included
 variable "advisor_threshold_cost" {
   type        = number
   default     = 50
   description = "Minimum potential monthly savings required to include an Advisor recommendation."
 }
 
-# Advisor categories to include (e.g., Cost, Security, Reliability)
 variable "advisor_categories" {
   type        = list(string)
   default     = ["Cost"]
   description = "List of Advisor categories to include in the analysis."
 }
 
-# Tags to match on Advisor-affected resources (e.g., only tagged 'cost-critical')
 variable "filter_tags" {
   type        = map(string)
   default     = {
@@ -47,7 +60,6 @@ variable "filter_tags" {
   description = "Map of resource tags used to filter Advisor recommendations (key-value match)."
 }
 
-# Optionally specify allowed resource types (e.g., only apply to VirtualMachines)
 variable "allowed_resource_types" {
   type        = list(string)
   default     = ["Microsoft.Compute/virtualMachines"]

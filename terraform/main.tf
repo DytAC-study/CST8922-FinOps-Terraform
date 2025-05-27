@@ -1,17 +1,21 @@
 # =============================================
-# main.tf – Step-by-step resource creation for Advisor automation
+# main.tf – Multi-profile Function App deployment
 # =============================================
 
-# Step 1: Create a resource group to contain all related resources
 resource "azurerm_resource_group" "advisor" {
   name     = var.resource_group_name
   location = var.location
 }
 
+resource "random_integer" "suffix" {
+  for_each = var.report_profiles
+  min      = 10000
+  max      = 99999
+}
 
-# Step 2: Create a storage account for Function App (required dependency)
 resource "azurerm_storage_account" "advisor_sa" {
-  name                     = "advisorfuncsa${random_integer.rand.result}"
+  for_each                 = var.report_profiles
+  name                     = "advsa${random_integer.suffix[each.key].result}"
   resource_group_name      = azurerm_resource_group.advisor.name
   location                 = azurerm_resource_group.advisor.location
   account_tier             = "Standard"
@@ -19,15 +23,9 @@ resource "azurerm_storage_account" "advisor_sa" {
   allow_blob_public_access = false
 }
 
-resource "random_integer" "rand" {
-  min = 10000
-  max = 99999
-}
-
-
-# Step 3: Create an App Service plan with consumption pricing (dynamic plan)
 resource "azurerm_app_service_plan" "advisor_plan" {
-  name                = "advisor-app-plan"
+  for_each            = var.report_profiles
+  name                = "advisor-plan-${each.key}"
   location            = azurerm_resource_group.advisor.location
   resource_group_name = azurerm_resource_group.advisor.name
   kind                = "FunctionApp"
@@ -38,15 +36,15 @@ resource "azurerm_app_service_plan" "advisor_plan" {
   }
 }
 
-
-# Step 4: Create the Function App that will execute Advisor logic and send email
 resource "azurerm_function_app" "advisor_func" {
-  name                       = "advisor-func-app"
+  for_each = var.report_profiles
+
+  name                       = "advisor-func-${each.key}"
   location                   = azurerm_resource_group.advisor.location
   resource_group_name        = azurerm_resource_group.advisor.name
-  app_service_plan_id        = azurerm_app_service_plan.advisor_plan.id
-  storage_account_name       = azurerm_storage_account.advisor_sa.name
-  storage_account_access_key = azurerm_storage_account.advisor_sa.primary_access_key
+  app_service_plan_id        = azurerm_app_service_plan.advisor_plan[each.key].id
+  storage_account_name       = azurerm_storage_account.advisor_sa[each.key].name
+  storage_account_access_key = azurerm_storage_account.advisor_sa[each.key].primary_access_key
   os_type                    = "linux"
   version                    = "4"
   functions_extension_version = "~4"
@@ -58,13 +56,22 @@ resource "azurerm_function_app" "advisor_func" {
   }
 
   app_settings = {
-    FUNCTIONS_WORKER_RUNTIME = "python"
-    EMAIL_RECIPIENTS         = join(",", var.email_recipients)
-    ADVISOR_THRESHOLD_COST   = tostring(var.advisor_threshold_cost)
-    ADVISOR_CATEGORIES       = join(",", var.advisor_categories)
+    FUNCTIONS_WORKER_RUNTIME   = "python"
+    EMAIL_RECIPIENTS           = join(",", each.value.email_recipients)
+    ADVISOR_THRESHOLD_COST     = tostring(each.value.advisor_threshold_cost)
+    ADVISOR_CATEGORIES         = join(",", each.value.advisor_categories)
+    FILTER_TAGS                = join(",", [for k, v in each.value.filter_tags : "${k}=${v}"])
+    ALLOWED_RESOURCE_TYPES     = join(",", each.value.allowed_resource_types)
   }
 
   identity {
     type = "SystemAssigned"
+  }
+}
+
+output "function_urls" {
+  value = {
+    for profile, app in azurerm_function_app.advisor_func :
+    profile => "https://${app.default_hostname}"
   }
 }

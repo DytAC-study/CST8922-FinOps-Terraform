@@ -1,160 +1,164 @@
-# Azure Advisor Notifier – Cost Optimization Automation
+# 🧠 Azure Advisor Notifier Architecture Overview
 
-This project implements an Azure Function + Terraform-based solution that regularly analyzes Azure Advisor recommendations, filters them based on cost, tags, resource types, and other rules, and notifies stakeholders via email.
-
-It is designed for FinOps and CloudOps teams managing large Azure environments.
+This document explains the **logical structure**, **component communication**, and **operational flow** of the Azure Advisor Notifier project.
+It is designed to provide FinOps and DevOps teams with a precise understanding of how this cost optimization automation system works.
 
 ---
 
-## 📁 Project Structure
+## 📦 System Objectives
+
+- Automatically retrieve Azure Advisor recommendations
+- Filter suggestions based on business criteria
+- Notify teams via email with HTML-formatted reports
+- Enable scalable, configurable, and auditable deployments using Terraform
+
+---
+
+## 📌 Key Infrastructure Components (Provisioned by Terraform)
+
+| Component | Purpose | Key Technology |
+|-----------|---------|----------------|
+| `tfstate_storage.tf` | Deploys the Azure Storage Account + container used to store the Terraform state file | Azure Storage (Blob) |
+| `backend.tf` | Configures Terraform to use the above storage account as a remote backend | Terraform backend block (azurerm) |
+| `main.tf` | Provisions one or more Function Apps based on profiles, plus supporting resources | Azure Function App + Identity + App Service Plan + Storage |
+| `function/` | Contains Python code and trigger definition for executing Advisor queries and sending notifications | Python Function App with Timer Trigger |
+
+### 🔄 Backend Relationship Clarified
+
+- `tfstate_storage.tf` creates the actual storage container where the `.tfstate` file is stored.
+- `backend.tf` connects Terraform to this location so that it can share state between team members or CI/CD runs.
+
+> 💡 Remote state is critical for avoiding race conditions and enabling safe collaboration in infrastructure deployments.
+
+---
+
+## 🧱 Component Interaction & Workflow
+
+### 🌐 Deployment Phase
+
+```mermaid
+flowchart TD
+    subgraph Terraform_Deployment
+        TFSTATE[tfstate_storage.tf → Azure Blob]
+        BACKEND[backend.tf ← reads from Blob]
+        MAIN[main.tf → Multiple Function Apps by profile]
+    end
+
+    DEV[Developer or GitHub Action] --> TFSTATE
+    TFSTATE --> BACKEND
+    BACKEND --> MAIN
+```
+
+### ⚙️ Runtime Phase (Every Day at 09:00 UTC)
+
+```mermaid
+flowchart TD
+    TTRIGGER([Timer Trigger: 0 0 9 * * *]) --> FUNAPP[Function App per profile - init.py]
+    FUNAPP --> ADVISOR[Call Azure Advisor API]
+    FUNAPP --> FILTER[Filter by Category / Cost / Tags / Type]
+    FILTER --> REPORT[Generate HTML Report]
+    REPORT --> EMAILSEND[Loop → MAIL_ENDPOINT]
+```
+
+---
+
+## 🔁 Runtime Logic Summary
+
+Each Function App receives environment variables specific to its profile, enabling:
+
+- Distinct recipient lists (per department or client)
+- Custom thresholds, categories, tags, and resource type filters
+- Independent reporting logic and isolation
+
+---
+
+## 🔧 Environment Variables (Per Function App)
+
+| Variable | Purpose |
+|----------|---------|
+| `EMAIL_RECIPIENTS` | Comma-separated list of recipient email addresses |
+| `ADVISOR_THRESHOLD_COST` | Minimum potential cost saving required to include a recommendation |
+| `ADVISOR_CATEGORIES` | Advisor categories to filter (e.g., Cost, HighAvailability) |
+| `FILTER_TAGS` | A list of key=value pairs to filter only tagged resources |
+| `ALLOWED_RESOURCE_TYPES` | List of resource type identifiers to include |
+| `AZURE_SUBSCRIPTION_ID` | The Azure subscription used to query Advisor API (shared) |
+| `MAIL_ENDPOINT` | External API for sending HTML reports (shared or profile-specific) |
+
+---
+
+## 🔁 Sample Multi-Profile Configuration (in `dev.tfvars`)
+
+```hcl
+report_profiles = {
+  finance = {
+    email_recipients       = ["finops@example.com", "cfo@example.com"]
+    advisor_categories     = ["Cost"]
+    advisor_threshold_cost = 50
+    filter_tags = {
+      department  = "finance"
+      environment = "production"
+    }
+    allowed_resource_types = ["Microsoft.Compute/virtualMachines"]
+  },
+
+  devops = {
+    email_recipients       = ["devops@example.com"]
+    advisor_categories     = ["HighAvailability"]
+    advisor_threshold_cost = 20
+    filter_tags = {
+      team        = "infrastructure"
+      environment = "production"
+    }
+    allowed_resource_types = ["Microsoft.Sql/servers"]
+  },
+
+  clientA = {
+    email_recipients       = ["client-a@example.com"]
+    advisor_categories     = ["Cost"]
+    advisor_threshold_cost = 25
+    filter_tags = {
+      customer_id = "A001"
+    }
+    allowed_resource_types = ["Microsoft.Web/sites"]
+  }
+}
+```
+
+---
+
+## 📁 Directory Structure Recap
 
 ```bash
 azure-advisor-notifier/
-├── terraform/               # Infrastructure-as-Code with Terraform
-│   ├── provider.tf
-│   ├── variables.tf
-│   ├── main.tf
-│   ├── outputs.tf
-│   ├── backend.tf
-│   ├── tfstate_storage.tf
-│   └── dev.tfvars
+├── terraform/
+│   ├── tfstate_storage.tf     # Deploys backend storage
+│   ├── backend.tf             # Configures remote state
+│   ├── main.tf                # Provisions all resources
+│   ├── dev.tfvars             # Multi-profile overrides
+│   └── *.tf                   # Other modules
 │
-├── function/                # Azure Function (Python) logic
-│   ├── __init__.py
-│   ├── requirements.txt
-│   ├── function.json
-│   └── local.settings.json
+├── function/
+│   ├── __init__.py            # Main function logic
+│   ├── function.json          # Timer trigger config
+│   ├── requirements.txt       # Dependencies
+│   └── local.settings.json    # Local dev environment (ignored by Git)
 │
-├── scripts/                 # Optional CLI tools for testing
-│   └── test_advisor_api.py
-│
+├── scripts/
+│   └── test_advisor_api.py    # Local Advisor API test utility
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 🛠️ Features
+## ✅ End-to-End Benefits
 
-- Uses **Azure Advisor** to identify optimization opportunities (e.g., RI underuse)
-- Filters recommendations based on:
-  - Minimum potential savings (cost threshold)
-  - Specific categories (e.g., Cost, HighAvailability)
-  - Required tags on affected resources
-  - Allowed resource types (e.g., Virtual Machines only)
-- Sends formatted email reports to one or more recipients
-- Runs on a schedule via **Timer Triggered Azure Function**
-- Infrastructure is defined via **Terraform** and deployed in two phases
+- ✅ Automated, actionable cloud cost visibility from Azure Advisor
+- ✅ Declarative deployment via Terraform with remote state sharing
+- ✅ Supports fine-grained control via tags, types, and categories
+- ✅ Fully email-integrated with customizable endpoints
+- ✅ Designed for extensibility (Power BI, approvals, dashboards)
 
 ---
 
-## 📦 Terraform Deployment (Remote Backend Setup)
-
-### 1️⃣ Step 1: Deploy backend storage for Terraform state
-
-```bash
-cd terraform
-terraform init
-terraform apply -target=azurerm_resource_group.tfstate \
-                -target=azurerm_storage_account.tfstate \
-                -target=azurerm_storage_container.tfstate
-```
-
-**Note the outputs** and update `backend.tf` accordingly:
-
-```hcl
-terraform {
-  backend "azurerm" {
-    resource_group_name  = "rg-tfstate"
-    storage_account_name = "tfstateXXXX"
-    container_name       = "tfstate"
-    key                  = "advisor-dev.tfstate"
-  }
-}
-```
-
-### 2️⃣ Step 2: Initialize and deploy Azure infrastructure
-
-```bash
-terraform init \
-  -backend-config="resource_group_name=rg-tfstate" \
-  -backend-config="storage_account_name=tfstateXXXX" \
-  -backend-config="container_name=tfstate" \
-  -backend-config="key=advisor-dev.tfstate"
-
-terraform apply -var-file=dev.tfvars
-```
-
----
-
-## 🔧 Environment Variables
-
-These are injected automatically via Terraform into the Function App:
-
-| Variable | Description |
-|----------|-------------|
-| `EMAIL_RECIPIENTS` | Comma-separated list of emails |
-| `ADVISOR_THRESHOLD_COST` | Minimum monthly savings required |
-| `ADVISOR_CATEGORIES` | Categories to include (e.g., Cost) |
-| `FILTER_TAGS` | Format: `key1=value1,key2=value2` |
-| `ALLOWED_RESOURCE_TYPES` | Resource types to include |
-| `AZURE_SUBSCRIPTION_ID` | Your Azure subscription ID |
-| `MAIL_ENDPOINT` | Email API endpoint (e.g., SendGrid, webhook) |
-
----
-
-## 🔄 Function Logic (`function/__init__.py`)
-
-- Uses `DefaultAzureCredential` for auth (make sure MSI is enabled)
-- Pulls all Advisor recommendations
-- Applies filters:
-  - Cost >= threshold
-  - Category match
-  - Tag match (all key=value pairs must exist)
-  - Resource type match
-- Generates HTML summary report
-- Sends email to all recipients via POST to `MAIL_ENDPOINT`
-
----
-
-## 🧪 Local Development
-
-Install requirements:
-```bash
-cd function
-pip install -r requirements.txt
-```
-
-Run with Azure Functions Core Tools:
-```bash
-func start
-```
-
-Local config (`local.settings.json`) includes all env vars.
-
----
-
-## 🧰 Test Script
-
-To verify your Azure credentials and Advisor access:
-
-```bash
-python scripts/test_advisor_api.py
-```
-
----
-
-## 🚀 Future Enhancements
-
-- Role-based alert routing via tags or metadata
-- Power BI Embedded dashboard for FinOps reporting
-- Approval-based RI purchases via Logic Apps
-- Integration with Microsoft Graph for secure mail delivery
-- Dynamic exclusion rules or recommendation lifecycle tracking
-
----
-
-## 📬 Contact / Team
-
-Built for CST8922 – Cloud Infrastructure Design and Automation.
-For questions or contributions, please contact your team lead or FinOps architect.
+For questions, contact the FinOps architecture team or cloud automation owner.

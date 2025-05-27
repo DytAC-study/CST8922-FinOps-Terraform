@@ -1,37 +1,40 @@
 # =============================================
-# dev.tfvars – Development/Test Configuration Example
+# dev.tfvars – Development/Test Configuration for Multi-Profile Mode
 # =============================================
 
-# Azure location for all resources
 location = "East US"
-
-# Resource group name (can be reused across environments)
 resource_group_name = "rg-cost-automation-dev"
 
-# Who should receive the Advisor alerts
-email_recipients = [
-  "dev-finops@example.com",
-  "cloud-ops@example.com"
-]
+report_profiles = {
+  finance = {
+    email_recipients       = ["finops@example.com", "cfo@example.com"]
+    advisor_categories     = ["Cost"]
+    advisor_threshold_cost = 50
+    filter_tags = {
+      department  = "finance"
+      environment = "production"
+    }
+    allowed_resource_types = ["Microsoft.Compute/virtualMachines"]
+  },
 
-# Only include Advisor recommendations with potential savings >= $50/month
-advisor_threshold_cost = 50
+  devops = {
+    email_recipients       = ["devops@example.com"]
+    advisor_categories     = ["HighAvailability"]
+    advisor_threshold_cost = 20
+    filter_tags = {
+      team        = "infrastructure"
+      environment = "production"
+    }
+    allowed_resource_types = ["Microsoft.Sql/servers"]
+  },
 
-# Limit Advisor to these categories
-advisor_categories = [
-  "Cost",
-  "HighAvailability"
-]
-
-# Only include resources with all matching tags
-filter_tags = {
-  environment = "production"
-  finops      = "true"
-  department  = "engineering"
+  clientA = {
+    email_recipients       = ["client-a@example.com"]
+    advisor_categories     = ["Cost"]
+    advisor_threshold_cost = 25
+    filter_tags = {
+      customer_id = "A001"
+    }
+    allowed_resource_types = ["Microsoft.Web/sites"]
+  }
 }
-
-# Restrict output to only these resource types (optional)
-allowed_resource_types = [
-  "Microsoft.Compute/virtualMachines",
-  "Microsoft.Sql/servers"
-]
