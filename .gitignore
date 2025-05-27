@@ -1,0 +1,30 @@
+# .gitignore – Ignore local and build files
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode
+.vscode/
+
+# Environment
+.env
+local.settings.json
+
+# Azure Function build artifacts
+/bin/
+/obj/
+*.zip
+
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+*.tfplan
+
+# OS files
+.DS_Store
+Thumbs.db
